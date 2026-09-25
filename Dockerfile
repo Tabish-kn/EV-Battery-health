@@ -14,7 +14,11 @@ COPY requirements.txt .
 # Install python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files and serialized artifacts
+# Copy application files, modular source, data, and serialized models
+COPY src/ ./src/
+COPY data/ ./data/
+COPY models/ ./models/
+COPY reports/ ./reports/
 COPY feature_engine.py .
 COPY eda_and_model.py .
 COPY app.py .
@@ -24,6 +28,8 @@ COPY scaler.pkl .
 COPY imputer.pkl .
 COPY feature_columns.pkl .
 COPY ev_battery_health.csv .
+COPY MODEL_CARD.md .
+COPY PROJECT_AUDIT.md .
 
 # Expose default Streamlit port
 EXPOSE 8501
