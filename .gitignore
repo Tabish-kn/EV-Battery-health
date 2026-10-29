@@ -13,6 +13,12 @@ ENV/
 .pytest_cache/
 .coverage
 
+# Environment & secrets
+.env
+.env.*
+!.env.example
+.env.local
+
 # Jupyter Checkpoints
 .ipynb_checkpoints/
 

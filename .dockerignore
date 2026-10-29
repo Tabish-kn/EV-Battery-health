@@ -3,6 +3,14 @@ __pycache__/
 *$py.class
 .git/
 .gitignore
+.dockerignore
 .env
-.ipynb_checkpoints/
+.env.*
+.pytest_cache/
+.coverage
+tests/
+notebooks/
+*.ipynb
+make_notebook.py
+build_all_notebooks.py
 *.log

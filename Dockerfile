@@ -1,40 +1,45 @@
 FROM python:3.11-slim
 
+# Prevent Python from writing .pyc files and enable unbuffered logging
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8501
+
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (build-essential for C extensions, curl for healthchecks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency specifications
+# Copy and install dependencies first to leverage Docker layer caching
 COPY requirements.txt .
-
-# Install python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files, modular source, data, and serialized models
+# Copy application source, configuration, assets, and serialized models
 COPY src/ ./src/
 COPY data/ ./data/
 COPY models/ ./models/
 COPY reports/ ./reports/
-COPY feature_engine.py .
-COPY eda_and_model.py .
+COPY .streamlit/ ./.streamlit/
 COPY app.py .
-COPY ev_pipeline_bundle.pkl .
-COPY ev_battery_model.pkl .
-COPY scaler.pkl .
-COPY imputer.pkl .
-COPY feature_columns.pkl .
-COPY ev_battery_health.csv .
 COPY MODEL_CARD.md .
 COPY PROJECT_AUDIT.md .
+COPY README.md .
 
-# Expose default Streamlit port
+# Create non-root user for production security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose default port
 EXPOSE 8501
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+# Healthcheck targeting Streamlit core healthcheck endpoint using dynamic PORT
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl --fail http://localhost:${PORT}/_stcore/health || exit 1
 
-# Launch Streamlit with headless settings
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Launch Streamlit with dynamic PORT and 0.0.0.0 binding
+CMD streamlit run app.py --server.port=${PORT} --server.address=0.0.0.0
