@@ -17,14 +17,51 @@ import os
 import io
 import json
 import base64
+import warnings
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+
+# Suppress cross-version warnings for clean production logs
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+warnings.filterwarnings("ignore", message=".*use_container_width.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+
+def safe_val(df_or_series: Any, col: Optional[str] = None, default: float = 0.0, as_int: bool = False) -> Any:
+    """
+    Safely retrieves a numeric scalar value from a DataFrame, Series, dict, or scalar,
+    handling missing columns, empty sequences, and float NaN values without raising ValueError.
+    """
+    try:
+        val = df_or_series
+        if col is not None:
+            if hasattr(df_or_series, "columns") and col not in df_or_series.columns:
+                return int(default) if as_int else float(default)
+            if hasattr(df_or_series, "__getitem__"):
+                val = df_or_series[col]
+
+        if hasattr(val, "iloc"):
+            val = val.iloc[0] if len(val) > 0 else default
+        elif hasattr(val, "values"):
+            val = val.values[0] if len(val.values) > 0 else default
+        elif isinstance(val, (list, tuple)):
+            val = val[0] if len(val) > 0 else default
+
+        if val is None or pd.isna(val):
+            return int(default) if as_int else float(default)
+
+        f_val = float(val)
+        if np.isnan(f_val):
+            return int(default) if as_int else float(default)
+
+        return int(round(f_val)) if as_int else f_val
+    except Exception:
+        return int(default) if as_int else float(default)
 
 from src.config import (
     RAW_DATA_PATH,
@@ -283,19 +320,19 @@ if models["failure"]:
     X_f, _, _ = get_feature_matrix(active_row, target_type="failure")
     active_fail_proba = float(models["failure"].predict_proba(X_f)[0, 1])
 else:
-    active_fail_proba = float(active_row.get("battery_failure", [0])[0])
+    active_fail_proba = float(safe_val(active_row, "battery_failure", 0.0))
 
 if models["soh"]:
     X_s, _, _ = get_feature_matrix(active_row, target_type="soh")
     active_soh = float(np.clip(models["soh"].predict(X_s)[0], 0.0, 100.0))
 else:
-    active_soh = float(active_row.get("state_of_health", [85.0])[0])
+    active_soh = float(safe_val(active_row, "state_of_health", 85.0))
 
 if models["rul"]:
     X_r, _, _ = get_feature_matrix(active_row, target_type="rul")
     active_rul = float(np.maximum(0.0, models["rul"].predict(X_r)[0]))
 else:
-    active_rul = float(active_row.get("predicted_remaining_life_cycles", [5000.0])[0])
+    active_rul = float(safe_val(active_row, "predicted_remaining_life_cycles", 5000.0))
 
 if models["anomaly"]:
     X_a, _, _ = get_feature_matrix(active_row, target_type="anomaly")
@@ -309,12 +346,12 @@ else:
 active_risk = compute_battery_risk_score(
     failure_probability=active_fail_proba,
     soh_percent=active_soh,
-    cell_temp_max=float(active_feat.get("cell_temperature_max", [35.0]).values[0]),
-    voltage_imbalance_mv=float(active_feat.get("voltage_imbalance", [15.0]).values[0]),
-    fast_charge_ratio=float(active_feat.get("fast_charge_ratio", [0.3]).values[0]),
+    cell_temp_max=safe_val(active_feat, "cell_temperature_max", 35.0),
+    voltage_imbalance_mv=safe_val(active_feat, "voltage_imbalance", 15.0),
+    fast_charge_ratio=safe_val(active_feat, "fast_charge_ratio", 0.3),
     anomaly_score_100=active_anom_score,
-    cooling_health=float(active_feat.get("cooling_system_health", [80.0]).values[0]),
-    cycle_count=float(active_feat.get("cycle_count", [1000.0]).values[0])
+    cooling_health=safe_val(active_feat, "cooling_system_health", 80.0),
+    cycle_count=safe_val(active_feat, "cycle_count", 1000.0)
 )
 
 
@@ -402,7 +439,7 @@ if nav_option == "⚡ Executive Overview":
             }
         ))
         fig_gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font={'color': "#e2e8f0"}, height=320, margin=dict(l=20, r=20, t=40, b=20))
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.plotly_chart(fig_gauge)
 
     with r1_col2:
         st.markdown("### 🕸️ Diagnostic Subsystem Breakdown")
@@ -435,41 +472,41 @@ if nav_option == "⚡ Executive Overview":
             height=320,
             margin=dict(l=40, r=40, t=30, b=20)
         )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        st.plotly_chart(fig_radar)
 
     # Battery Pack Subsystem Health Grid
     st.markdown("### 🔋 Battery Pack Subsystem Architecture")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">🔥 Thermal Subsystem</div>
-            <div class="metric-value">""" + f"{active_feat.get('cell_temperature_max', [35.0]).values[0]:.1f}°C" + """</div>
-            <div class="metric-sub">Cooling Health: """ + f"{active_feat.get('cooling_system_health', [80.0]).values[0]:.0f}%" + """</div>
+            <div class="metric-value">{safe_val(active_feat, 'cell_temperature_max', 35.0):.1f}°C</div>
+            <div class="metric-sub">Cooling Health: {safe_val(active_feat, 'cooling_system_health', 80.0):.0f}%</div>
         </div>
         """, unsafe_allow_html=True)
     with c2:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">⚡ Electrical Subsystem</div>
-            <div class="metric-value">""" + f"{active_feat.get('voltage_imbalance', [15.0]).values[0]:.1f} mV" + """</div>
-            <div class="metric-sub">Pack Voltage: """ + f"{active_feat.get('pack_voltage', [380.0]).values[0]:.1f} V" + """</div>
+            <div class="metric-value">{safe_val(active_feat, 'voltage_imbalance', 15.0):.1f} mV</div>
+            <div class="metric-sub">Pack Voltage: {safe_val(active_feat, 'pack_voltage', 380.0):.1f} V</div>
         </div>
         """, unsafe_allow_html=True)
     with c3:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">🔌 Charging Subsystem</div>
-            <div class="metric-value">""" + f"{active_feat.get('fast_charge_ratio', [0.3]).values[0]:.1%}" + """</div>
-            <div class="metric-sub">Charge Power: """ + f"{active_feat.get('average_charge_power_kw', [50.0]).values[0]:.1f} kW" + """</div>
+            <div class="metric-value">{safe_val(active_feat, 'fast_charge_ratio', 0.3):.1%}</div>
+            <div class="metric-sub">Charge Power: {safe_val(active_feat, 'average_charge_power_kw', 50.0):.1f} kW</div>
         </div>
         """, unsafe_allow_html=True)
     with c4:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">🛡️ BMS Health & Faults</div>
-            <div class="metric-value">""" + f"{int(active_feat.get('previous_faults', [0]).values[0])} Faults" + """</div>
-            <div class="metric-sub">BMS Warnings: """ + f"{int(active_feat.get('BMS_warning_count', [0]).values[0])}" + """</div>
+            <div class="metric-value">{safe_val(active_feat, 'previous_faults', 0, as_int=True)} Faults</div>
+            <div class="metric-sub">BMS Warnings: {safe_val(active_feat, 'BMS_warning_count', 0, as_int=True)}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -485,17 +522,17 @@ elif nav_option == "🔋 Battery Health & SOH":
     with col1:
         st.metric("Predicted SOH", f"{active_soh:.2f}%", delta=f"{active_soh - 80.0:.2f}% vs 80% EOL")
     with col2:
-        cap_loss = float(active_row.get("capacity_loss_percent", [100.0 - active_soh]).values[0])
+        cap_loss = safe_val(active_row, "capacity_loss_percent", 100.0 - active_soh)
         st.metric("Capacity Loss", f"{cap_loss:.2f}%")
     with col3:
-        ir = float(active_row.get("internal_resistance", [0.45]).values[0])
+        ir = safe_val(active_row, "internal_resistance", 0.45)
         st.metric("Internal Resistance", f"{ir:.3f} mΩ")
 
     st.divider()
     st.markdown("### 📉 Longitudinal SOH Degradation Curve")
-    current_cycles = int(active_row.get("cycle_count", [500]).values[0])
-    fast_ratio = float(active_row.get("fast_charge_ratio", [0.3]).values[0])
-    ambient = float(active_row.get("average_ambient_temperature", [25.0]).values[0])
+    current_cycles = safe_val(active_row, "cycle_count", 500, as_int=True)
+    fast_ratio = safe_val(active_row, "fast_charge_ratio", 0.3)
+    ambient = safe_val(active_row, "average_ambient_temperature", 25.0)
 
     traj = simulate_degradation_trajectory(
         current_soh=active_soh,
@@ -523,7 +560,7 @@ elif nav_option == "🔋 Battery Health & SOH":
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)"
     )
-    st.plotly_chart(fig_deg, use_container_width=True)
+    st.plotly_chart(fig_deg)
 
 
 # ==========================================
@@ -553,13 +590,13 @@ elif nav_option == "⚠️ Failure Prediction":
     with col2:
         st.markdown("### 📊 Top Telemetry Risk Drivers")
         risk_drivers = [
-            ("Thermal Runaway Risk Index", float(active_feat.get("thermal_runaway_risk", [20.0]).values[0]), "Higher increases failure rate"),
-            ("Cell Temperature Max", float(active_feat.get("cell_temperature_max", [35.0]).values[0]), "Thermal stress on SEI layer"),
-            ("Internal Resistance", float(active_feat.get("internal_resistance", [0.4]).values[0]), "Ohmic heating & capacity degradation"),
-            ("Voltage Imbalance", float(active_feat.get("voltage_imbalance", [15.0]).values[0]), "Cell-to-cell divergence")
+            ("Thermal Runaway Risk Index", safe_val(active_feat, "thermal_runaway_risk", 20.0), "Higher increases failure rate"),
+            ("Cell Temperature Max", safe_val(active_feat, "cell_temperature_max", 35.0), "Thermal stress on SEI layer"),
+            ("Internal Resistance", safe_val(active_feat, "internal_resistance", 0.4), "Ohmic heating & capacity degradation"),
+            ("Voltage Imbalance", safe_val(active_feat, "voltage_imbalance", 15.0), "Cell-to-cell divergence")
         ]
         driver_df = pd.DataFrame(risk_drivers, columns=["Telemetry Metric", "Pack Value", "Engineering Significance"])
-        st.dataframe(driver_df, use_container_width=True)
+        st.dataframe(driver_df)
 
 
 # ==========================================
@@ -607,7 +644,7 @@ elif nav_option == "🚨 Anomaly Detection":
                 X_a_scaled, models["anomaly"].feature_names, top_k=6
             )
             attr_df = pd.DataFrame(attributions)
-            st.dataframe(attr_df, use_container_width=True)
+            st.dataframe(attr_df)
         else:
             st.info("Anomaly model artifact is being finalized.")
 
@@ -631,7 +668,7 @@ elif nav_option == "🔍 Explainable AI (SHAP)":
             if not pos_df.empty:
                 fig_pos = px.bar(pos_df, x="shap_value", y="feature", orientation="h", color_discrete_sequence=["#ef4444"])
                 fig_pos.update_layout(template="plotly_dark", title="Positive SHAP Contributions", height=280)
-                st.plotly_chart(fig_pos, use_container_width=True)
+                st.plotly_chart(fig_pos)
             else:
                 st.write("No major risk-increasing factors detected.")
 
@@ -641,7 +678,7 @@ elif nav_option == "🔍 Explainable AI (SHAP)":
             if not neg_df.empty:
                 fig_neg = px.bar(neg_df, x="shap_value", y="feature", orientation="h", color_discrete_sequence=["#10b981"])
                 fig_neg.update_layout(template="plotly_dark", title="Negative SHAP Contributions", height=280)
-                st.plotly_chart(fig_neg, use_container_width=True)
+                st.plotly_chart(fig_neg)
             else:
                 st.write("No major risk-decreasing factors detected.")
 
@@ -659,10 +696,10 @@ elif nav_option == "🧪 What-If Simulator":
 
     with sim_col1:
         st.markdown("#### 🎛️ Scenario Parameters")
-        sim_temp = st.slider("Ambient Temperature (°C)", -20.0, 50.0, float(active_row.get("average_ambient_temperature", [25.0]).values[0]), 1.0)
-        sim_fast_ratio = st.slider("Fast Charging Ratio", 0.0, 1.0, float(active_row.get("fast_charge_ratio", [0.3]).values[0]), 0.05)
-        sim_cycles = st.slider("Completed Cycles", 100, 10000, int(active_row.get("cycle_count", [1000]).values[0]), 100)
-        sim_cooling = st.slider("Cooling System Health (%)", 10.0, 100.0, float(active_row.get("cooling_system_health", [80.0]).values[0]), 5.0)
+        sim_temp = st.slider("Ambient Temperature (°C)", -20.0, 50.0, safe_val(active_row, "average_ambient_temperature", 25.0), 1.0)
+        sim_fast_ratio = st.slider("Fast Charging Ratio", 0.0, 1.0, safe_val(active_row, "fast_charge_ratio", 0.3), 0.05)
+        sim_cycles = st.slider("Completed Cycles", 100, 10000, safe_val(active_row, "cycle_count", 1000, as_int=True), 100)
+        sim_cooling = st.slider("Cooling System Health (%)", 10.0, 100.0, safe_val(active_row, "cooling_system_health", 80.0), 5.0)
 
     with sim_col2:
         if models["failure"]:
@@ -726,11 +763,11 @@ elif nav_option == "📊 Fleet Analytics":
     with col_a:
         fig_soh = px.histogram(df_filtered, x="state_of_health", nbins=40, title="SOH Distribution", color_discrete_sequence=["#38bdf8"])
         fig_soh.update_layout(template="plotly_dark", height=300)
-        st.plotly_chart(fig_soh, use_container_width=True)
+        st.plotly_chart(fig_soh)
     with col_b:
         fig_fail = px.histogram(df_filtered, x="battery_failure", nbins=2, title="Failure Incidence (0=Healthy, 1=Failure)", color_discrete_sequence=["#ef4444"])
         fig_fail.update_layout(template="plotly_dark", height=300)
-        st.plotly_chart(fig_fail, use_container_width=True)
+        st.plotly_chart(fig_fail)
 
 
 # ==========================================
@@ -763,7 +800,7 @@ elif nav_option == "📄 Batch Processing & Reports":
                         rul_bundle=models["rul"],
                         anomaly_bundle=models["anomaly"]
                     )
-                    st.dataframe(df_enriched.head(10), use_container_width=True)
+                    st.dataframe(df_enriched.head(10))
 
                     # Export Enriched CSV
                     csv_bytes = df_enriched.to_csv(index=False).encode('utf-8')
@@ -821,13 +858,13 @@ elif nav_option == "📈 Model Performance & Cards":
             {"Task": "Remaining Useful Life (RUL)", "Champion Model": "XGBoost Regressor + Intervals", "Primary Metric": "R²: 0.9989", "Secondary Metric": "MAE: 42.1 cycles", "Safety Metric": "90% Confidence Bounds"},
             {"Task": "Anomaly Detection", "Champion Model": "Isolation Forest", "Primary Metric": "Contamination: 5.0%", "Secondary Metric": "Normalized Score: 0-100", "Safety Metric": "Multivariate Attribution"}
         ]
-        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+        st.dataframe(pd.DataFrame(summary_data))
 
     with tab2:
         for fig_name in ["failure_model_evaluation.png", "soh_model_evaluation.png", "rul_model_evaluation.png", "anomaly_model_evaluation.png", "shap_global_summary.png"]:
             fig_p = os.path.join(FIGURES_DIR, fig_name)
             if os.path.exists(fig_p):
-                st.image(fig_p, caption=fig_name, use_container_width=True)
+                st.image(fig_p, caption=fig_name)
 
     with tab3:
         if os.path.exists("MODEL_CARD.md"):

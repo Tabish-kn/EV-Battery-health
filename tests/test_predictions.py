@@ -85,3 +85,39 @@ def test_batch_pipeline_and_models():
     assert "battery_risk_score" in enriched.columns
     assert "risk_category" in enriched.columns
     assert len(enriched) == 10
+
+
+def test_nan_telemetry_handling():
+    """Verifies that missing or NaN values in telemetry records do not cause ValueError during inference."""
+    from app import safe_val
+    from src.risk_scoring import compute_battery_risk_score
+    from src.what_if import BatteryWhatIfSimulator
+    from src.models import ModelBundle
+    from src.config import FAILURE_MODEL_DIR, SOH_MODEL_DIR, RUL_MODEL_DIR, ANOMALY_MODEL_DIR
+
+    nan_row = pd.DataFrame({
+        "cycle_count": [np.nan],
+        "BMS_warning_count": [np.nan],
+        "previous_faults": [np.nan],
+        "cell_temperature_max": [np.nan],
+        "cooling_system_health": [np.nan],
+        "fast_charge_ratio": [np.nan],
+        "voltage_imbalance": [np.nan],
+        "average_ambient_temperature": [np.nan]
+    })
+
+    # Test safe_val conversions
+    assert safe_val(nan_row, "cycle_count", 500, as_int=True) == 500
+    assert safe_val(nan_row, "previous_faults", 0, as_int=True) == 0
+    assert safe_val(nan_row, "cell_temperature_max", 35.0) == 35.0
+
+    # Test what-if simulator with NaNs
+    failure_bundle = ModelBundle.load(str(FAILURE_MODEL_DIR))
+    soh_bundle = ModelBundle.load(str(SOH_MODEL_DIR))
+    rul_bundle = ModelBundle.load(str(RUL_MODEL_DIR))
+    anomaly_bundle = ModelBundle.load(str(ANOMALY_MODEL_DIR))
+
+    simulator = BatteryWhatIfSimulator(failure_bundle, soh_bundle, rul_bundle, anomaly_bundle)
+    res = simulator.simulate_scenario(nan_row, {"average_ambient_temperature": 30.0})
+    assert "simulated" in res
+    assert "deltas" in res

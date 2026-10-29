@@ -89,7 +89,7 @@ class BatteryModelExplainer:
             attributions.append({
                 "feature": feat,
                 "shap_value": float(val),
-                "feature_value": float(raw_val) if isinstance(raw_val, (int, float, np.number)) else str(raw_val),
+                "feature_value": "N/A" if (raw_val is None or pd.isna(raw_val)) else (round(float(raw_val), 3) if isinstance(raw_val, (int, float, np.number)) else str(raw_val)),
                 "impact": "INCREASES_RISK" if val > 0 else "DECREASES_RISK"
             })
 

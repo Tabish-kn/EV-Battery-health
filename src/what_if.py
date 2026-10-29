@@ -65,11 +65,21 @@ class BatteryWhatIfSimulator:
             anom_score = 15.0
 
         # 6. Risk Score
-        cell_temp_max = float(df_feat.get("cell_temperature_max", [35.0])[0])
-        voltage_imb = float(df_feat.get("voltage_imbalance", [15.0])[0])
-        fast_chg = float(df_feat.get("fast_charge_ratio", [0.3])[0])
-        cooling = float(df_feat.get("cooling_system_health", [80.0])[0])
-        cycles = float(df_feat.get("cycle_count", [1000.0])[0])
+        def _safe_val(df_in, col, default):
+            try:
+                if col in df_in.columns:
+                    val = df_in[col].iloc[0] if len(df_in[col]) > 0 else default
+                    if pd.notna(val) and not np.isnan(float(val)):
+                        return float(val)
+            except Exception:
+                pass
+            return float(default)
+
+        cell_temp_max = _safe_val(df_feat, "cell_temperature_max", 35.0)
+        voltage_imb = _safe_val(df_feat, "voltage_imbalance", 15.0)
+        fast_chg = _safe_val(df_feat, "fast_charge_ratio", 0.3)
+        cooling = _safe_val(df_feat, "cooling_system_health", 80.0)
+        cycles = _safe_val(df_feat, "cycle_count", 1000.0)
 
         risk_data = compute_battery_risk_score(
             failure_probability=fail_proba,

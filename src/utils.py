@@ -72,16 +72,23 @@ def run_batch_pipeline(
     risk_scores = []
     risk_categories = []
 
+    def _get_val(r, k, default):
+        try:
+            v = r.get(k, default)
+            return default if pd.isna(v) else float(v)
+        except Exception:
+            return float(default)
+
     for idx, row in df_feat.iterrows():
         r = compute_battery_risk_score(
-            failure_probability=float(df_out.loc[idx, "predicted_failure_probability"]),
-            soh_percent=float(df_out.loc[idx, "predicted_soh_percent"]),
-            cell_temp_max=float(row.get("cell_temperature_max", 35.0)),
-            voltage_imbalance_mv=float(row.get("voltage_imbalance", 15.0)),
-            fast_charge_ratio=float(row.get("fast_charge_ratio", 0.3)),
-            anomaly_score_100=float(df_out.loc[idx, "anomaly_score_100"]),
-            cooling_health=float(row.get("cooling_system_health", 80.0)),
-            cycle_count=float(row.get("cycle_count", 1000.0))
+            failure_probability=_get_val(df_out.loc[idx], "predicted_failure_probability", 0.0),
+            soh_percent=_get_val(df_out.loc[idx], "predicted_soh_percent", 85.0),
+            cell_temp_max=_get_val(row, "cell_temperature_max", 35.0),
+            voltage_imbalance_mv=_get_val(row, "voltage_imbalance", 15.0),
+            fast_charge_ratio=_get_val(row, "fast_charge_ratio", 0.3),
+            anomaly_score_100=_get_val(df_out.loc[idx], "anomaly_score_100", 15.0),
+            cooling_health=_get_val(row, "cooling_system_health", 80.0),
+            cycle_count=_get_val(row, "cycle_count", 1000.0)
         )
         risk_scores.append(r["composite_risk_score"])
         risk_categories.append(r["risk_category"])
